@@ -5,7 +5,7 @@
 -- License: GPL-3.0-or-later
 module Main (main) where
 
-import Control.Applicative       (many, optional, (<**>))
+import Control.Applicative       (many, (<**>))
 import Control.Exception         (handle)
 import Control.Monad             (unless, when)
 import Data.ByteString           (ByteString)
@@ -14,7 +14,7 @@ import Data.Foldable             (traverse_)
 import Data.List                 (intercalate, isPrefixOf)
 import Data.List.Split           (splitOn)
 import Data.Map                  (Map)
-import Data.Maybe                (fromMaybe, mapMaybe)
+import Data.Maybe                (mapMaybe)
 import Data.Version              (showVersion)
 import System.Directory
        (createDirectoryIfMissing, getAppUserDataDirectory)
@@ -25,8 +25,7 @@ import System.IO                 (hPutStrLn, stderr)
 import System.IO.Error           (IOError)
 import System.Process
        (StdStream (NoStream), createProcess, cwd, proc, std_in, waitForProcess)
-import System.Process.ByteString
-       (readCreateProcessWithExitCode, readProcessWithExitCode)
+import System.Process.ByteString (readProcessWithExitCode)
 import Text.PrettyPrint          ((<+>))
 import Text.Read                 (readMaybe)
 
@@ -56,8 +55,8 @@ main :: IO ()
 main = do
     Opts {..} <- O.execParser optsP'
 
-    let compiler = fromMaybe "ghc" optCompiler
-    let envname  = fromMaybe "default" optEnvName
+    let compiler = optCompiler
+    let envname  = optEnvName
 
     -- let's figure GHC version
     ghcEnvDir <- getGhcEnvDir compiler
@@ -217,8 +216,8 @@ getEnvironmentContents fp = handle onIOError $ do
 -- TODO: commands to list package environments, their contents, delete, copy.
 -- TODO: special . name for "package environment in this directory"
 data Opts = Opts
-    { optCompiler :: Maybe FilePath
-    , optEnvName  :: Maybe String
+    { optCompiler :: FilePath
+    , optEnvName  :: String
     , optAnyVer   :: Bool
     , optVerbose  :: Bool
     , optDeps     :: [Dependency]
@@ -226,10 +225,10 @@ data Opts = Opts
 
 optsP :: O.Parser Opts
 optsP = Opts
-    <$> optional (O.strOption (O.short 'w' <> O.long "with-compiler"))
-    <*> optional (O.strOption (O.short 'n' <> O.long "name"))
+    <$> O.strOption (O.short 'w' <> O.long "with-compiler" <> O.value "ghc" <> O.showDefault <> O.help "Specify compiler to use")
+    <*> O.strOption (O.short 'n' <> O.long "name" <> O.value "default" <> O.showDefault <> O.help "Environment name")
     <*> O.switch (O.short 'a' <> O.long "any" <> O.help "Allow any version of existing packages")
-    <*> O.switch (O.short 'v' <> O.long "verbose")
+    <*> O.switch (O.short 'v' <> O.long "verbose" <> O.help "Print stuff...")
     <*> many (O.argument (O.eitherReader eitherParsec) (O.metavar "PKG..." <> O.help "packages (with possible bounds)"))
 
 -------------------------------------------------------------------------------
