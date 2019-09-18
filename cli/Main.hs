@@ -23,7 +23,8 @@ import System.FilePath           ((</>))
 import System.FilePath.Glob      (glob)
 import System.IO                 (hPutStrLn, stderr)
 import System.IO.Error           (IOError)
-import System.Process            (cwd, proc)
+import System.Process
+       (StdStream (NoStream), createProcess, cwd, proc, std_in, waitForProcess)
 import System.Process.ByteString
        (readCreateProcessWithExitCode, readProcessWithExitCode)
 import Text.PrettyPrint          ((<+>))
@@ -97,17 +98,23 @@ main = do
                 , "  documentation: False"
                 ]
 
-            (ec, out, err) <- runProcess tmpDir "cabal" ["v2-build", "all", "--builddir=dist-newstyle"] ""
+            (_, _, _, hdl) <- createProcess $
+                    let p0 = proc "cabal" ["v2-build", "all", "--builddir=dist-newstyle"]
+                        p  = p0
+                            { cwd    = Just tmpDir
+                            , std_in = NoStream
+                            }
+                        in p
+            ec <- waitForProcess hdl
+
             case ec of
                 ExitFailure _ -> do
-                    BS.putStr out
-                    BS.putStr err
-
                     hPutStrLn stderr "ERROR: cabal v2-build failed"
                     hPutStrLn stderr "This is might be due inconsistent dependencies (delete package env file, or try -a) or something else"
                     exitFailure
 
                 ExitSuccess -> do
+                    -- TODO: use cabal-plan to read stuff, better than relying on ghc.environment files, maybe?
                     matches <- glob $ tmpDir </> ".ghc.environment.*-*-*"
                     case matches of
                         [envFile] -> do
@@ -207,6 +214,8 @@ getEnvironmentContents fp = handle onIOError $ do
 -- Options parser
 -------------------------------------------------------------------------------
 
+-- TODO: commands to list package environments, their contents, delete, copy.
+-- TODO: special . name for "package environment in this directory"
 data Opts = Opts
     { optCompiler :: Maybe FilePath
     , optEnvName  :: Maybe String
@@ -254,6 +263,7 @@ die msg = do
     hPutStrLn stderr $ "Panic: " ++ msg
     exitFailure
 
+{-
 runProcess
     :: FilePath      -- ^ Working directory
     -> String        -- ^ Command
@@ -267,20 +277,7 @@ runProcess cwd cmd args stdin =
     p  = p0
         { cwd = Just cwd
         }
-
-runProcess
-    :: FilePath      -- ^ Working directory
-    -> String        -- ^ Command
-    -> [String]      -- ^ Arguments
-    -> ByteString    -- ^ Stdin
-    -> IO (ExitCode, ByteString, ByteString)
-runProcess cwd cmd args stdin =
-    readCreateProcessWithExitCode p stdin
-  where
-    p0 = proc cmd args
-    p  = p0
-        { cwd = Just cwd
-        }
+-}
 
 readProcessWithExitCode' :: FilePath -> [String] -> IO ByteString
 readProcessWithExitCode' cmd args = do
