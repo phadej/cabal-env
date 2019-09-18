@@ -5,19 +5,19 @@
 -- License: GPL-3.0-or-later
 module Main (main) where
 
-import Control.Applicative       (many, (<**>))
+import Control.Applicative       (many, optional, (<**>), (<|>))
 import Control.Exception         (handle)
 import Control.Monad             (unless, when)
 import Data.ByteString           (ByteString)
 import Data.Char                 (isAlphaNum)
 import Data.Foldable             (traverse_)
-import Data.List                 (intercalate, isPrefixOf)
+import Data.List                 (intercalate, isPrefixOf, sort)
 import Data.List.Split           (splitOn)
 import Data.Map                  (Map)
 import Data.Maybe                (mapMaybe)
 import Data.Version              (showVersion)
 import System.Directory
-       (createDirectoryIfMissing, getAppUserDataDirectory)
+       (createDirectoryIfMissing, getAppUserDataDirectory, listDirectory)
 import System.Exit               (ExitCode (..), exitFailure)
 import System.FilePath           ((</>))
 import System.FilePath.Glob      (glob)
@@ -53,21 +53,56 @@ import Paths_cabal_env (version)
 
 main :: IO ()
 main = do
-    Opts {..} <- O.execParser optsP'
+    opts <- O.execParser optsP'
+    ghcEnvDir <- getGhcEnvDir (optCompiler opts)
 
-    let compiler = optCompiler
-    let envname  = optEnvName
+    case optAction opts of
+        Nothing         -> installAction opts ghcEnvDir
+        Just ActionShow -> showAction opts ghcEnvDir
+        Just ActionList -> listAction opts ghcEnvDir
+  where
+    optsP' = O.info (optsP <**> O.helper <**> versionP) $ mconcat
+        [ O.fullDesc
+        , O.progDesc "Manage package-enviroments"
+        , O.header "cabal-env - a better cabal-install install --lib"
+        ]
 
-    -- let's figure GHC version
-    ghcEnvDir <- getGhcEnvDir compiler
+    versionP = O.infoOption (showVersion version)
+        $ O.long "version" <> O.help "Show version"
 
+-------------------------------------------------------------------------------
+-- List
+-------------------------------------------------------------------------------
+
+listAction :: Opts -> FilePath -> IO ()
+listAction Opts {..} ghcEnvDir = do
+    when optVerbose $ putStrLn $ "Environments available in " ++ ghcEnvDir
+    fs <- listDirectory ghcEnvDir
+    traverse_ putStrLn (sort fs)
+
+-------------------------------------------------------------------------------
+-- Show
+-------------------------------------------------------------------------------
+
+showAction :: Opts -> FilePath -> IO ()
+showAction Opts {..} ghcEnvDir = do
+    pkgIds <- getEnvironmentContents $ ghcEnvDir </> optEnvName
+    when optVerbose $ putStrLn $ "Packages in " ++ optEnvName ++ " environment"
+    traverse_ (putStrLn . prettyShow) (sort pkgIds)
+
+-------------------------------------------------------------------------------
+-- Install
+-------------------------------------------------------------------------------
+
+installAction :: Opts -> FilePath -> IO ()
+installAction Opts {..} ghcEnvDir = do
     unless (null optDeps) $ do
         when optVerbose $ do
             putStrLn "=== ghc environment directory"
             putStrLn ghcEnvDir
 
         createDirectoryIfMissing True ghcEnvDir
-        pkgIds <- getEnvironmentContents $ ghcEnvDir </> envname
+        pkgIds <- getEnvironmentContents $ ghcEnvDir </> optEnvName
 
         when optVerbose $ do
             putStrLn "=== packages in environment"
@@ -90,7 +125,7 @@ main = do
             writeFile (tmpDir </> "fake-package.cabal") cabalFile
             writeFile (tmpDir </> "cabal.project") $ unlines
                 [ "packages: ."
-                , "with-compiler: " ++ compiler
+                , "with-compiler: " ++ optCompiler
                 , "documentation: False"
                 , "write-ghc-environment-files: always"
                 , "package *"
@@ -133,20 +168,10 @@ main = do
                                 putStrLn "=== writing environment file"
                                 putStr $ unlines ls
 
-                            writeFile (ghcEnvDir </> envname) (unlines ls)
+                            writeFile (ghcEnvDir </> optEnvName) (unlines ls)
 
                         _ -> die "Cannot find .ghc.environment file"
 
-
-  where
-    optsP' = O.info (optsP <**> O.helper <**> versionP) $ mconcat
-        [ O.fullDesc
-        , O.progDesc "Manage package-enviroments"
-        , O.header "cabal-env - a better cabal-install install --lib"
-        ]
-
-    versionP = O.infoOption (showVersion version)
-        $ O.long "version" <> O.help "Show version"
 
 -------------------------------------------------------------------------------
 -- GHC environment directory
@@ -221,7 +246,12 @@ data Opts = Opts
     , optAnyVer   :: Bool
     , optVerbose  :: Bool
     , optDeps     :: [Dependency]
+    , optAction   :: Maybe Action
     }
+
+data Action
+    = ActionShow  -- ^ show package environment contents
+    | ActionList  -- ^ list package environments
 
 optsP :: O.Parser Opts
 optsP = Opts
@@ -230,6 +260,13 @@ optsP = Opts
     <*> O.switch (O.short 'a' <> O.long "any" <> O.help "Allow any version of existing packages")
     <*> O.switch (O.short 'v' <> O.long "verbose" <> O.help "Print stuff...")
     <*> many (O.argument (O.eitherReader eitherParsec) (O.metavar "PKG..." <> O.help "packages (with possible bounds)"))
+    -- behaviour flags
+    <*> optional actionP
+
+actionP :: O.Parser Action
+actionP = showP <|> listP where
+    showP = O.flag' ActionShow (O.short 's' <> O.long "show" <> O.help "Shows the contents of the environment")
+    listP = O.flag' ActionList (O.short 'l' <> O.long "list" <> O.help "List package environments")
 
 -------------------------------------------------------------------------------
 -- Fake project
