@@ -133,7 +133,7 @@ installAction Opts {..} ghcEnvDir = do
                 ]
 
             (_, _, _, hdl) <- createProcess $
-                    let p0 = proc "cabal" ["v2-build", "all", "--builddir=dist-newstyle"]
+                    let p0 = proc "cabal" $ ["v2-build", "all", "--builddir=dist-newstyle"] ++ if optDryRun then ["--dry-run"] else []
                         p  = p0
                             { cwd    = Just tmpDir
                             , std_in = NoStream
@@ -147,6 +147,7 @@ installAction Opts {..} ghcEnvDir = do
                     hPutStrLn stderr "This is might be due inconsistent dependencies (delete package env file, or try -a) or something else"
                     exitFailure
 
+                ExitSuccess | optDryRun -> return ()
                 ExitSuccess -> do
                     -- TODO: use cabal-plan to read stuff, better than relying on ghc.environment files, maybe?
                     matches <- glob $ tmpDir </> ".ghc.environment.*-*-*"
@@ -245,6 +246,7 @@ data Opts = Opts
     , optEnvName  :: String
     , optAnyVer   :: Bool
     , optVerbose  :: Bool
+    , optDryRun   :: Bool
     , optDeps     :: [Dependency]
     , optAction   :: Maybe Action
     }
@@ -259,6 +261,7 @@ optsP = Opts
     <*> O.strOption (O.short 'n' <> O.long "name" <> O.value "default" <> O.showDefault <> O.help "Environment name")
     <*> O.switch (O.short 'a' <> O.long "any" <> O.help "Allow any version of existing packages")
     <*> O.switch (O.short 'v' <> O.long "verbose" <> O.help "Print stuff...")
+    <*> O.switch (O.short 'd' <> O.long "dry-run" <> O.help "Dry run, don't install anything")
     <*> many (O.argument (O.eitherReader eitherParsec) (O.metavar "PKG..." <> O.help "packages (with possible bounds)"))
     -- behaviour flags
     <*> optional actionP
